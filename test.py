@@ -9,9 +9,14 @@ import pandas as pd
 import torch
 import numpy as np
 
-import pynvml
 import PPO_model
 from env.load_data import nums_detec
+
+try:
+    import pynvml
+except ImportError:
+    pynvml = None
+
 
 def setup_seed(seed):
     torch.manual_seed(seed)
@@ -20,13 +25,19 @@ def setup_seed(seed):
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
 
+
 def main():
     # PyTorch initialization
     # gpu_tracker = MemTracker()  # Used to monitor memory (of gpu)
-    pynvml.nvmlInit()
-    handle = pynvml.nvmlDeviceGetHandleByIndex(0)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    if device.type=='cuda':
+    handle = None
+    if device.type == 'cuda' and pynvml is not None:
+        try:
+            pynvml.nvmlInit()
+            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+        except pynvml.NVMLError as exc:
+            print("pynvml is unavailable; GPU memory guard disabled:", exc)
+    if device.type == 'cuda':
         torch.cuda.set_device(device)
         torch.set_default_tensor_type('torch.cuda.FloatTensor')
     else:
@@ -41,6 +52,12 @@ def main():
     model_paras = load_dict["model_paras"]
     train_paras = load_dict["train_paras"]
     test_paras = load_dict["test_paras"]
+    if os.getenv("FJSP_NUM_INS"):
+        test_paras["num_ins"] = int(os.environ["FJSP_NUM_INS"])
+    if os.getenv("FJSP_NUM_AVERAGE"):
+        test_paras["num_average"] = int(os.environ["FJSP_NUM_AVERAGE"])
+    if os.getenv("FJSP_DATA_PATH"):
+        test_paras["data_path"] = os.environ["FJSP_DATA_PATH"]
     env_paras["device"] = device
     model_paras["device"] = device
     env_test_paras = copy.deepcopy(env_paras)
@@ -56,7 +73,6 @@ def main():
     test_files = os.listdir(data_path)
     test_files.sort(key=lambda x: x[:-4])
     test_files = test_files[:num_ins]
-    mod_files = os.listdir('./model/')[:]
 
     memories = PPO_model.Memory()
     model = PPO_model.PPO(model_paras, train_paras)
@@ -66,7 +82,7 @@ def main():
     # Detect and add models to "rules"
     if "DRL" in rules:
         for root, ds, fs in os.walk('./model/'):
-            for f in fs:
+            for f in sorted(fs):
                 if f.endswith('.pt'):
                     rules.append(f)
     if len(rules) != 1:
@@ -83,11 +99,7 @@ def main():
     file_name = [test_files[i] for i in range(num_ins)]
     data_file = pd.DataFrame(file_name, columns=["file_name"])
     data_file.to_excel(writer, sheet_name='Sheet1', index=False)
-    writer.save()
-    writer.close()
     data_file.to_excel(writer_time, sheet_name='Sheet1', index=False)
-    writer_time.save()
-    writer_time.close()
 
     # Rule-by-rule (model-by-model) testing
     start = time.time()
@@ -95,11 +107,12 @@ def main():
         rule = rules[i_rules]
         # Load trained model
         if rule.endswith('.pt'):
+            checkpoint_path = os.path.join('./model', rule)
             if device.type == 'cuda':
-                model_CKPT = torch.load('./model/' + mod_files[i_rules])
+                model_CKPT = torch.load(checkpoint_path)
             else:
-                model_CKPT = torch.load('./model/' + mod_files[i_rules], map_location='cpu')
-            print('\nloading checkpoint:', mod_files[i_rules])
+                model_CKPT = torch.load(checkpoint_path, map_location='cpu')
+            print('\nloading checkpoint:', rule)
             model.policy.load_state_dict(model_CKPT)
             model.policy_old.load_state_dict(model_CKPT)
         print('rule:', rule)
@@ -122,9 +135,10 @@ def main():
             # Create environment object
             else:
                 # Clear the existing environment
-                meminfo = pynvml.nvmlDeviceGetMemoryInfo(handle)
-                if meminfo.used / meminfo.total > 0.7:
-                    envs.clear()
+                if handle is not None:
+                    meminfo = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                    if meminfo.used / meminfo.total > 0.7:
+                        envs.clear()
                 # DRL-S, each env contains multiple (=num_sample) copies of one instance
                 if test_paras["sample"]:
                     env = gym.make('fjsp-v0', case=[test_file] * test_paras["num_sample"],
@@ -158,17 +172,16 @@ def main():
         # Save makespan and time data to files
         data = pd.DataFrame(torch.tensor(makespans).t().tolist(), columns=[rule])
         data.to_excel(writer, sheet_name='Sheet1', index=False, startcol=i_rules + 1)
-        writer.save()
-        writer.close()
         data = pd.DataFrame(torch.tensor(times).t().tolist(), columns=[rule])
         data.to_excel(writer_time, sheet_name='Sheet1', index=False, startcol=i_rules + 1)
-        writer_time.save()
-        writer_time.close()
 
         for env in envs:
             env.reset()
 
+    writer.close()
+    writer_time.close()
     print("total_spend_time: ", time.time() - start)
+
 
 def schedule(env, model, memories, flag_sample=False):
     # Get state and completion signal
@@ -176,20 +189,17 @@ def schedule(env, model, memories, flag_sample=False):
     dones = env.done_batch
     done = False  # Unfinished at the beginning
     last_time = time.time()
-    i = 0
-    while ~done:
-        i += 1
+    while not bool(done):
         with torch.no_grad():
             actions = model.policy_old.act(state, memories, dones, flag_sample=flag_sample, flag_train=False)
         state, rewards, dones = env.step(actions)  # environment transit
         done = dones.all()
     spend_time = time.time() - last_time  # The time taken to solve this environment (instance)
-    # print("spend_time: ", spend_time)
 
     # Verify the solution
     gantt_result = env.validate_gantt()[0]
     if not gantt_result:
-        print("Scheduling Error！！！！！！")
+        print("Scheduling Error!")
     return copy.deepcopy(env.makespan_batch), spend_time
 
 

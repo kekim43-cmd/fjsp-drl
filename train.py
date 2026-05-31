@@ -9,11 +9,22 @@ import gym
 import pandas as pd
 import torch
 import numpy as np
-from visdom import Visdom
 
 import PPO_model
 from env.case_generator import CaseGenerator
 from validate import validate, get_validate_env
+
+try:
+    from visdom import Visdom
+except ImportError:
+    Visdom = None
+
+
+def env_flag(name, default):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def setup_seed(seed):
@@ -41,6 +52,15 @@ def main():
     env_paras = load_dict["env_paras"]
     model_paras = load_dict["model_paras"]
     train_paras = load_dict["train_paras"]
+    if os.getenv("FJSP_MAX_ITERATIONS"):
+        train_paras["max_iterations"] = int(os.environ["FJSP_MAX_ITERATIONS"])
+    if os.getenv("FJSP_SAVE_TIMESTEP"):
+        train_paras["save_timestep"] = int(os.environ["FJSP_SAVE_TIMESTEP"])
+    if os.getenv("FJSP_VALID_BATCH_SIZE"):
+        env_paras["valid_batch_size"] = int(os.environ["FJSP_VALID_BATCH_SIZE"])
+    if os.getenv("FJSP_BATCH_SIZE"):
+        env_paras["batch_size"] = int(os.environ["FJSP_BATCH_SIZE"])
+    train_paras["viz"] = env_flag("FJSP_VIZ", train_paras["viz"])
     env_paras["device"] = device
     model_paras["device"] = device
     env_valid_paras = copy.deepcopy(env_paras)
@@ -61,7 +81,9 @@ def main():
     makespan_best = float('inf')
 
     # Use visdom to visualize the training process
-    is_viz = train_paras["viz"]
+    is_viz = train_paras["viz"] and Visdom is not None
+    if train_paras["viz"] and Visdom is None:
+        print("visdom is not installed; training visualization disabled.")
     if is_viz:
         viz = Visdom(env=train_paras["viz_name"])
 
@@ -75,14 +97,15 @@ def main():
     writer_100 = pd.ExcelWriter('{0}/training_100_{1}.xlsx'.format(save_path, str_time))
     valid_results = []
     valid_results_100 = []
-    data_file = pd.DataFrame(np.arange(10, 1010, 10), columns=["iterations"])
+    validation_iterations = np.arange(
+        train_paras["save_timestep"],
+        train_paras["max_iterations"] + 1,
+        train_paras["save_timestep"],
+    )
+    data_file = pd.DataFrame(validation_iterations, columns=["iterations"])
     data_file.to_excel(writer_ave, sheet_name='Sheet1', index=False)
-    writer_ave.save()
-    writer_ave.close()
-    data_file = pd.DataFrame(np.arange(10, 1010, 10), columns=["iterations"])
+    data_file = pd.DataFrame(validation_iterations, columns=["iterations"])
     data_file.to_excel(writer_100, sheet_name='Sheet1', index=False)
-    writer_100.save()
-    writer_100.close()
 
     # Start training iteration
     start_time = time.time()
@@ -103,7 +126,7 @@ def main():
         last_time = time.time()
 
         # Schedule in parallel
-        while ~done:
+        while not bool(done):
             with torch.no_grad():
                 actions = model.policy_old.act(state, memories, dones)
             state, rewards, dones = env.step(actions)
@@ -157,12 +180,10 @@ def main():
     # Save the data of training curve to files
     data = pd.DataFrame(np.array(valid_results).transpose(), columns=["res"])
     data.to_excel(writer_ave, sheet_name='Sheet1', index=False, startcol=1)
-    writer_ave.save()
     writer_ave.close()
-    column = [i_col for i_col in range(100)]
+    column = [i_col for i_col in range(env_valid_paras["batch_size"])]
     data = pd.DataFrame(np.array(torch.stack(valid_results_100, dim=0).to('cpu')), columns=column)
     data.to_excel(writer_100, sheet_name='Sheet1', index=False, startcol=1)
-    writer_100.save()
     writer_100.close()
 
     print("total_time: ", time.time() - start_time)

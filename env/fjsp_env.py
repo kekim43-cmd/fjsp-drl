@@ -4,7 +4,6 @@ import torch
 
 from dataclasses import dataclass
 from env.load_data import load_fjs, nums_detec
-import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import random
@@ -123,6 +122,12 @@ class FJSPEnv(gym.Env):
         self.end_ope_biases_batch = self.num_ope_biases_batch + self.nums_ope_batch - 1
         # shape: (batch_size), the number of operations for each instance
         self.nums_opes = torch.sum(self.nums_ope_batch, dim=1)
+        self.action_space = gym.spaces.MultiDiscrete([
+            max(self.num_opes, 1),
+            max(self.num_mas, 1),
+            max(self.num_jobs, 1),
+        ])
+        self.observation_space = gym.spaces.Dict({})
 
         # dynamic variable
         self.batch_idxes = torch.arange(self.batch_size)  # Uncompleted instances
@@ -339,9 +344,9 @@ class FJSPEnv(gym.Env):
         self.time = e
 
         # Update partial schedule (state), variables and feature vectors
-        aa = self.machines_batch.transpose(1, 2)
-        aa[d, 0] = 1
-        self.machines_batch = aa.transpose(1, 2)
+        idle_flags = self.machines_batch[:, :, 0]
+        idle_flags[d] = 1
+        self.machines_batch[:, :, 0] = idle_flags
 
         utiliz = self.machines_batch[:, :, 2]
         cur_time = self.time[:, None].expand_as(utiliz)
@@ -350,11 +355,10 @@ class FJSPEnv(gym.Env):
         self.feat_mas_batch[:, 2, :] = utiliz
 
         jobs = torch.where(d, self.machines_batch[:, :, 3].double(), -1.0).float()
-        jobs_index = np.argwhere(jobs.cpu() >= 0).to(self.device)
-        job_idxes = jobs[jobs_index[0], jobs_index[1]].long()
-        batch_idxes = jobs_index[0]
-
-        self.mask_job_procing_batch[batch_idxes, job_idxes] = False
+        batch_idxes, ma_idxes = torch.where(jobs >= 0)
+        if batch_idxes.numel() > 0:
+            job_idxes = jobs[batch_idxes, ma_idxes].long()
+            self.mask_job_procing_batch[batch_idxes, job_idxes] = False
         self.mask_ma_procing_batch[d] = False
         self.mask_job_finish_batch = torch.where(self.ope_step_batch == self.end_ope_biases_batch + 1,
                                                  True, self.mask_job_finish_batch)
