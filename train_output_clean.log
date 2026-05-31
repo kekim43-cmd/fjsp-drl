@@ -1,0 +1,43 @@
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+Users of this version of Gym should be able to simply replace 'import gym' with 'import gymnasium as gym' in the vast majority of cases.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+C:\Users\cherr\AppData\Local\Programs\Python\Python313\Lib\site-packages\torch\cuda\__init__.py:65: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+C:\Users\cherr\AppData\Local\Programs\Python\Python313\Lib\site-packages\torch\__init__.py:1305: UserWarning: torch.set_default_tensor_type() is deprecated as of PyTorch 2.1, please use torch.set_default_dtype() and torch.set_default_device() as alternatives. (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\torch\csrc\tensor\python_tensor.cpp:436.)
+  _C._set_default_tensor_type(t)
+C:\my-project\2.smartfactory\0526_13주차\fjsp-drl_구현\fjsp-drl\train.py:185: DeprecationWarning: __array__ implementation doesn't accept a copy keyword, so passing copy=False failed. __array__ must implement 'dtype' and 'copy' keyword arguments. To learn more, see the migration guide https://numpy.org/devdocs/numpy_2_0_migration_guide.html#adapting-to-changes-in-the-copy-keyword
+  data = pd.DataFrame(np.array(torch.stack(valid_results_100, dim=0).to('cpu')), columns=column)
+PyTorch device:  cpu
+num_job:  10 	num_mas:  5 	num_opes:  53
+spend_time:  0.35294413566589355
+reward:  -62.650 ; loss:  0.348
+spend_time:  0.38301539421081543
+reward:  -51.400 ; loss:  0.386
+spend_time:  0.3587658405303955
+reward:  -62.650 ; loss:  0.420
+spend_time:  0.3235800266265869
+reward:  -47.900 ; loss:  0.449
+spend_time:  0.41837549209594727
+reward:  -54.150 ; loss:  0.468
+
+Start validating
+There are 10 dev instances.
+validating time:  0.5020437240600586 
+
+spend_time:  0.3655211925506592
+reward:  -59.400 ; loss:  0.473
+spend_time:  0.39966368675231934
+reward:  -67.400 ; loss:  0.466
+spend_time:  0.336106538772583
+reward:  -47.400 ; loss:  0.439
+spend_time:  0.3511466979980469
+reward:  -71.900 ; loss:  0.402
+spend_time:  0.4201502799987793
+reward:  -54.900 ; loss:  0.358
+
+Start validating
+There are 10 dev instances.
+validating time:  0.579848051071167 
+
+total_time:  9.812803745269775

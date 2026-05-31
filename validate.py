@@ -28,7 +28,7 @@ def validate(env_paras, env, model_policy):
     state = env.state
     done = False
     dones = env.done_batch
-    while ~done:
+    while not bool(done):
         with torch.no_grad():
             actions = model_policy.act(state, memory, dones, flag_sample=False, flag_train=False)
         state, rewards, dones = env.step(actions)
